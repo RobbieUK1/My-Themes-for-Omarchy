@@ -2,6 +2,7 @@
 """Small custom-only theme picker for Omarchy. Python standard library only."""
 from pathlib import Path
 import os
+import json
 import re
 import shutil
 import subprocess
@@ -24,24 +25,105 @@ def lines(path):
             if line.strip() and not line.lstrip().startswith('#')}
 
 
-def themes():
-    if not USER_THEMES.is_dir():
-        return []
-    stock = {p.name.casefold() for root in STOCK_LOCATIONS if root.is_dir()
-             for p in root.iterdir() if p.is_dir()}
+MANAGE_STOCK = 'Add pre-installed themes…'
+HIDE_BAR = 'Hide top bar button'
+
+
+def stock_themes():
+    found = {}
+    for root in STOCK_LOCATIONS:
+        if root.is_dir():
+            for path in root.iterdir():
+                if path.is_dir() and VALID.fullmatch(path.name):
+                    found.setdefault(path.name.casefold(), path)
+    return found
+
+
+def theme_paths():
+    stock = stock_themes()
     include, exclude = lines(INCLUDE_FILE), lines(EXCLUDE_FILE)
-    found = []
-    for p in USER_THEMES.iterdir():
-        if not p.is_dir() or not VALID.fullmatch(p.name):
-            continue
-        # Avoid unrelated directories; any recognized Omarchy theme content counts.
-        if not any((p / f).exists() for f in ('colors.toml', 'alacritty.toml', 'preview.png', 'backgrounds', '.git')):
-            continue
-        name = p.name.casefold()
-        if name in exclude or (name in stock and name not in include):
-            continue
-        found.append(p.name)
-    return sorted(found, key=str.casefold)
+    found = {key: path for key, path in stock.items() if key in include and key not in exclude}
+    if USER_THEMES.is_dir():
+        for path in USER_THEMES.iterdir():
+            if not path.is_dir() or not VALID.fullmatch(path.name):
+                continue
+            if not any((path / f).exists() for f in ('colors.toml', 'alacritty.toml', 'preview.png', 'backgrounds', '.git')):
+                continue
+            key = path.name.casefold()
+            if key not in exclude and (key not in stock or key in include):
+                found[key] = path
+    return found
+
+
+def themes():
+    return sorted((p.name for p in theme_paths().values()), key=str.casefold)
+
+
+def save_stock_selection(stock, selected):
+    # Preserve comments and unrelated manual inclusions. Replace atomically.
+    existing = INCLUDE_FILE.read_text(encoding='utf-8').splitlines() if INCLUDE_FILE.exists() else []
+    kept = [line for line in existing if line.strip().casefold() not in stock]
+    content = '\n'.join(kept + sorted(selected, key=str.casefold)) + '\n'
+    INCLUDE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=INCLUDE_FILE.parent, delete=False) as file:
+            temporary = Path(file.name)
+            file.write(content)
+        temporary.replace(INCLUDE_FILE)
+    finally:
+        if temporary and temporary.exists():
+            temporary.unlink()
+
+
+def manage_stock():
+    stock = stock_themes()
+    excluded = lines(EXCLUDE_FILE)
+    # An explicit exclusion remains authoritative; explain it rather than silently overriding it.
+    names = sorted((p.name for key, p in stock.items() if key not in excluded), key=str.casefold)
+    if not names:
+        print('No available pre-installed themes found. Check exclude.txt if themes are hidden.', file=sys.stderr)
+        return 1
+    included = lines(INCLUDE_FILE)
+    if shutil.which('omarchy-menu-select'):
+        argv = ['omarchy-menu-select', 'Pre-installed themes — check to include', *names, '--', '--multiple']
+        for name in names:
+            if name.casefold() in included:
+                argv.extend(['--selected', name])
+        proc = subprocess.run(argv, text=True, capture_output=True)
+        if proc.returncode == 1:  # Escape: no changes.
+            return 0
+        if proc.returncode != 0:
+            print('Could not open the pre-installed theme checklist.', file=sys.stderr)
+            return 1
+        try:
+            selected = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            selected = None
+        if not isinstance(selected, list) or any(not isinstance(n, str) or n not in names for n in selected):
+            print('Invalid checklist result; settings unchanged.', file=sys.stderr)
+            return 1
+    elif sys.stdin.isatty():
+        print('Pre-installed themes (currently included marked [x]):')
+        for i, name in enumerate(names, 1):
+            print(f"{i}. [{'x' if name.casefold() in included else ' '}] {name}")
+        try:
+            value = input('Enter numbers to include, comma-separated; none to clear; Enter to cancel: ').strip()
+            if not value:
+                return 0
+            indices = [] if value.lower() == 'none' else [int(v.strip()) for v in value.split(',')]
+            if any(i < 1 or i > len(names) for i in indices):
+                raise ValueError
+            selected = [names[i-1] for i in indices]
+        except (ValueError, EOFError):
+            print('Checklist cancelled; settings unchanged.', file=sys.stderr)
+            return 0
+    else:
+        print('The checklist requires Omarchy’s native menu, or run my-themes --manage-stock in a terminal.', file=sys.stderr)
+        return 1
+    editable = {n.casefold() for n in names}
+    save_stock_selection(editable, selected)
+    return 0
 
 
 def current():
@@ -66,7 +148,7 @@ def previews(names, active):
     with tempfile.TemporaryDirectory(prefix='my-themes-') as directory:
         available = {}
         for name in names:
-            root = USER_THEMES / name
+            root = theme_paths().get(name.casefold(), USER_THEMES / name)
             images = [root / 'preview.png', root / 'preview.jpg']
             for backgrounds in (HOME / '.config/omarchy/backgrounds' / name, root / 'backgrounds'):
                 if backgrounds.is_dir():
@@ -116,24 +198,46 @@ def picker(options):
     return None
 
 
+def hide_bar():
+    choice = picker(['Hide top bar button', 'Cancel'])
+    if choice != 'Hide top bar button':
+        return 0
+    if not shutil.which('omarchy'):
+        print('Omarchy plugin command not found.', file=sys.stderr)
+        return 1
+    return subprocess.call(['omarchy', 'plugin', 'disable', 'io.github.robbieuk1.my-themes'])
+
+
 def main():
-    if any(arg not in ('--list', '--previews', '--help') for arg in sys.argv[1:]):
+    if any(arg not in ('--list', '--previews', '--manage-stock', '--hide-bar', '--help') for arg in sys.argv[1:]):
         print('Unknown option. Use --help.', file=sys.stderr)
         return 2
     if '--help' in sys.argv:
-        print('My Themes for Omarchy v0.1\nUsage: my-themes [--list | --previews | --help]')
+        print('My Themes for Omarchy v0.2\nUsage: my-themes [--list | --previews | --manage-stock | --hide-bar | --help]')
         return 0
+    if '--hide-bar' in sys.argv:
+        return hide_bar()
+    if '--manage-stock' in sys.argv:
+        return manage_stock()
     names = themes()
     if len(sys.argv) > 1 and sys.argv[1] == '--list':
         print('\n'.join(names))
         return 0
-    if not names:
-        print('No custom themes found in ' + str(USER_THEMES) + '.\n'
-              'Stock themes and stock-name overlays are excluded.', file=sys.stderr)
-        return 1
-    active = current().casefold()
-    shown = [('[active] ' if name.casefold() == active else '') + name for name in names]
-    choice = previews(names, active) if '--previews' in sys.argv else picker(shown)
+    while True:
+        active = current().casefold()
+        shown = [('[active] ' if name.casefold() == active else '') + name for name in names]
+        if '--previews' in sys.argv and names:
+            choice = previews(names, active)
+        else:
+            choice = picker(shown + [MANAGE_STOCK, HIDE_BAR])
+        if choice != MANAGE_STOCK:
+            break
+        result = manage_stock()
+        if result:
+            return result
+        names = themes()
+    if choice == HIDE_BAR:
+        return hide_bar()
     if not choice:
         return 0
     selection = choice.removeprefix('[active] ')

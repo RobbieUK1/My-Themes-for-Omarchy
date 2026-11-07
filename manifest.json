@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.robbieuk1.my-themes",
   "name": "My Themes for Omarchy",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "author": "RobbieUK1",
   "license": "MIT",
   "description": "Search your custom Omarchy themes, see the active theme, and optionally browse wallpaper previews.",

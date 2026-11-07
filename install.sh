@@ -13,6 +13,15 @@ Terminal=false
 Type=Application
 Categories=Settings;DesktopSettings;
 Icon=preferences-desktop-theme
+Actions=ManageStock;Previews;
+
+[Desktop Action ManageStock]
+Name=Choose pre-installed themes
+Exec="$HOME/.local/bin/my-themes" --manage-stock
+
+[Desktop Action Previews]
+Name=Wallpaper previews
+Exec="$HOME/.local/bin/my-themes" --previews
 EOF
 printf 'Installed: %s\n' "$HOME/.local/bin/my-themes"
 printf 'Launch "My Themes for Omarchy" from the app launcher, or run %s/.local/bin/my-themes\n' "$HOME"

@@ -11,7 +11,7 @@ with tempfile.TemporaryDirectory() as td:
  with mock.patch.object(m.shutil,'which',return_value='/bin/mock'), mock.patch.object(m.subprocess,'run',return_value=subprocess.CompletedProcess([],0,'Custom Theme\n','')):
   assert m.current()=='custom-theme'
  with mock.patch.object(m,'themes',return_value=['custom-theme']),mock.patch.object(m,'current',return_value='custom-theme'),mock.patch.object(m,'picker',return_value='[active] custom-theme') as pick,mock.patch.object(m.shutil,'which',return_value='/bin/mock'),mock.patch.object(m.subprocess,'call',return_value=0) as call,mock.patch.object(m.sys,'argv',['my-themes']):
-  assert m.main()==0;pick.assert_called_once_with(['[active] custom-theme']);call.assert_called_once_with(['omarchy','theme','set','custom-theme'])
+  assert m.main()==0;pick.assert_called_once_with(['[active] custom-theme', m.MANAGE_STOCK, m.HIDE_BAR]);call.assert_called_once_with(['omarchy','theme','set','custom-theme'])
  for choice in [None,'malicious']:
   with mock.patch.object(m,'themes',return_value=['custom-theme']),mock.patch.object(m,'current',return_value=''),mock.patch.object(m,'picker',return_value=choice),mock.patch.object(m.subprocess,'call') as call,mock.patch.object(m.sys,'argv',['my-themes']):
    assert m.main()==(0 if choice is None else 1);call.assert_not_called()
