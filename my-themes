@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Small custom-only theme picker for Omarchy. Python standard library only."""
+from pathlib import Path
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+HOME = Path.home()
+USER_THEMES = HOME / '.config/omarchy/themes'
+OMARCHY_PATH = Path(os.environ.get('OMARCHY_PATH', '/usr/share/omarchy' if Path('/usr/share/omarchy').is_dir() else str(HOME / '.local/share/omarchy')))
+STOCK_LOCATIONS = [OMARCHY_PATH / 'themes', Path('/usr/share/omarchy/themes'), HOME / '.local/share/omarchy/themes']
+INCLUDE_FILE = HOME / '.config/my-themes-omarchy/include.txt'
+EXCLUDE_FILE = HOME / '.config/my-themes-omarchy/exclude.txt'
+VALID = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.+\-]*$')
+
+
+def lines(path):
+    if not path.is_file():
+        return set()
+    return {line.strip().casefold() for line in path.read_text(encoding='utf-8').splitlines()
+            if line.strip() and not line.lstrip().startswith('#')}
+
+
+def themes():
+    if not USER_THEMES.is_dir():
+        return []
+    stock = {p.name.casefold() for root in STOCK_LOCATIONS if root.is_dir()
+             for p in root.iterdir() if p.is_dir()}
+    include, exclude = lines(INCLUDE_FILE), lines(EXCLUDE_FILE)
+    found = []
+    for p in USER_THEMES.iterdir():
+        if not p.is_dir() or not VALID.fullmatch(p.name):
+            continue
+        # Avoid unrelated directories; any recognized Omarchy theme content counts.
+        if not any((p / f).exists() for f in ('colors.toml', 'alacritty.toml', 'preview.png', 'backgrounds', '.git')):
+            continue
+        name = p.name.casefold()
+        if name in exclude or (name in stock and name not in include):
+            continue
+        found.append(p.name)
+    return sorted(found, key=str.casefold)
+
+
+def current():
+    if shutil.which('omarchy'):
+        try:
+            result = subprocess.run(['omarchy', 'theme', 'current'], capture_output=True, text=True, timeout=8)
+            if result.returncode == 0:
+                return result.stdout.strip().splitlines()[0].strip().lower().replace(' ', '-') if result.stdout.strip() else ''
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    path = HOME / '.local/state/omarchy/current/theme.name'
+    try:
+        return path.read_text(encoding='utf-8').strip()
+    except OSError:
+        return ''
+
+
+def previews(names, active):
+    """Use Omarchy's own thumbnail UI without copying wallpapers."""
+    if not shutil.which('omarchy-menu-images'):
+        return picker([('[active] ' if n.casefold() == active else '') + n for n in names])
+    with tempfile.TemporaryDirectory(prefix='my-themes-') as directory:
+        available = {}
+        for name in names:
+            root = USER_THEMES / name
+            images = [root / 'preview.png', root / 'preview.jpg']
+            for backgrounds in (HOME / '.config/omarchy/backgrounds' / name, root / 'backgrounds'):
+                if backgrounds.is_dir():
+                    images.extend(sorted(backgrounds.iterdir()))
+            source = next((p for p in images if p.is_file() and p.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp')), None)
+            if source:
+                label = ('[active] ' if name.casefold() == active else '') + name
+                link = Path(directory) / (label + source.suffix.lower())
+                link.symlink_to(source.resolve())
+                available[str(link)] = label
+        # Every theme must remain selectable, including themes without images.
+        if len(available) != len(names):
+            print('Some themes have no preview; using the complete searchable list.', file=sys.stderr)
+            return picker([('[active] ' if n.casefold() == active else '') + n for n in names])
+        argv = ['omarchy-menu-images', '--show-labels', '--filterable']
+        selected = next((p for p, label in available.items() if label.startswith('[active] ')), None)
+        if selected:
+            argv.extend(['--selected', selected])
+        proc = subprocess.run(argv + [directory], text=True, capture_output=True)
+        return available.get(proc.stdout.strip()) if proc.returncode == 0 else None
+
+
+def picker(options):
+    if shutil.which('omarchy-menu-select'):
+        proc = subprocess.run(['omarchy-menu-select', 'My Themes for Omarchy', *options], text=True, capture_output=True)
+        if proc.returncode in (0, 1):
+            return proc.stdout.strip() if proc.returncode == 0 else None
+
+    # fuzzel is Wayland native; rofi/wofi support many Omarchy versions.
+    candidates = [(['fuzzel', '--dmenu', '--prompt', 'My Themes > '], 'fuzzel'),
+                  (['rofi', '-dmenu', '-i', '-p', 'My Themes'], 'rofi'),
+                  (['wofi', '--dmenu', '--insensitive', '--prompt', 'My Themes'], 'wofi')]
+    for argv, name in candidates:
+        if shutil.which(name):
+            proc = subprocess.run(argv, input='\n'.join(options) + '\n', text=True, capture_output=True)
+            return proc.stdout.strip() if proc.returncode == 0 else None
+    if sys.stdin.isatty():
+        print('My Themes — choose a number:')
+        for i, opt in enumerate(options, 1):
+            print(f'{i}. {opt}')
+        try:
+            value = int(input('Selection (Enter to cancel): '))
+            return options[value-1] if 1 <= value <= len(options) else None
+        except (ValueError, EOFError):
+            return None
+    print('Install fuzzel, rofi, or wofi for a graphical picker.', file=sys.stderr)
+    return None
+
+
+def main():
+    if any(arg not in ('--list', '--previews', '--help') for arg in sys.argv[1:]):
+        print('Unknown option. Use --help.', file=sys.stderr)
+        return 2
+    if '--help' in sys.argv:
+        print('My Themes for Omarchy v0.1\nUsage: my-themes [--list | --previews | --help]')
+        return 0
+    names = themes()
+    if len(sys.argv) > 1 and sys.argv[1] == '--list':
+        print('\n'.join(names))
+        return 0
+    if not names:
+        print('No custom themes found in ' + str(USER_THEMES) + '.\n'
+              'Stock themes and stock-name overlays are excluded.', file=sys.stderr)
+        return 1
+    active = current().casefold()
+    shown = [('[active] ' if name.casefold() == active else '') + name for name in names]
+    choice = previews(names, active) if '--previews' in sys.argv else picker(shown)
+    if not choice:
+        return 0
+    selection = choice.removeprefix('[active] ')
+    # Validate selections against the original enumeration, not arbitrary picker output.
+    if selection not in names:
+        print('Invalid theme selection.', file=sys.stderr)
+        return 1
+    if shutil.which('omarchy'):
+        return subprocess.call(['omarchy', 'theme', 'set', selection])
+    if shutil.which('omarchy-theme-set'):
+        return subprocess.call(['omarchy-theme-set', selection])
+    print('Omarchy theme command not found.', file=sys.stderr)
+    return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
