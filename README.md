@@ -4,6 +4,10 @@ A lightweight, searchable picker for your custom Omarchy themes. Python standard
 
 **[Download v0.1 ZIP](https://github.com/RobbieUK1/My-Themes-for-Omarchy/releases/download/v0.1/My-Themes-for-Omarchy-v0.1.zip)** · **[Release notes](https://github.com/RobbieUK1/My-Themes-for-Omarchy/releases/tag/v0.1)**
 
+![My Themes for Omarchy showing custom themes and the active theme](preview.png)
+
+Screenshot supplied by RobbieUK1.
+
 ## Omarchy shell plugin (v0.1.1)
 
 Install the native bar button on Omarchy Quattro:
