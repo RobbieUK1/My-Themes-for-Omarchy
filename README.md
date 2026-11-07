@@ -4,7 +4,26 @@ A lightweight, searchable picker for your custom Omarchy themes. Python standard
 
 **[Download v0.1 ZIP](https://github.com/RobbieUK1/My-Themes-for-Omarchy/releases/download/v0.1/My-Themes-for-Omarchy-v0.1.zip)** · **[Release notes](https://github.com/RobbieUK1/My-Themes-for-Omarchy/releases/tag/v0.1)**
 
-## Install
+## Omarchy shell plugin (v0.1.1)
+
+Install the native bar button on Omarchy Quattro:
+
+```bash
+omarchy plugin add https://github.com/RobbieUK1/My-Themes-for-Omarchy --enable
+```
+
+Left-click **My Themes** to search custom themes. Right-click for wallpaper thumbnails. The bundled Python utility runs directly from the plugin folder; you do not need to run install.sh. Only one picker per bar button runs at a time. The button uses Omarchy's own styling and English strings with translation fallback.
+
+Requires Omarchy Quattro's shell, Python 3 and the native menu commands. No Python packages, network polling, administrator permissions, theme rewrites or replacement of the original picker. Adding/enabling uses Omarchy's normal consent and bar-placement flow. Removing the plugin removes only its own widget and checkout:
+
+```bash
+omarchy plugin disable io.github.robbieuk1.my-themes
+omarchy plugin remove io.github.robbieuk1.my-themes
+```
+
+License: MIT. Marketplace submission is subject to maintainer review. The native wrapper is validated with Omarchy's manifest validator; live graphical behavior of the new bar button has not yet been visually verified. The standalone v0.1 picker has been confirmed working by its user.
+
+## Standalone install (v0.1)
 
 Run this one-line command as your normal user (no sudo). Requires Bash, curl, unzip and Python 3:
 
